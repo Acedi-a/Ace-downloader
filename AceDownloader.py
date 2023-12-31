@@ -3,6 +3,7 @@ from PIL import Image, ImageTk
 from tkinter import filedialog, ttk,messagebox
 from pytube import YouTube, Playlist
 import os
+import threading
 
 set_appearance_mode("dark")
 set_default_color_theme("dark-blue")
@@ -56,7 +57,7 @@ class App(CTk):
         
         # Combobox para elegir formato y calidad
         self.cbox_calidad_var = StringVar(value="Buena calidad")
-        self.cbox_calidad = CTkComboBox(self, height=20, values=["Maxima calidad", "Alta calidad", "Buena calidad", "Baja calidad", "Solo audio", "Solo Video"], command=self.calidad_elegida, variable=self.cbox_calidad_var)
+        self.cbox_calidad = CTkComboBox(self, height=20, values=["Maxima calidad", "Alta calidad", "Buena calidad", "Baja calidad", "Solo audio", "Solo Video"], command=self.calidades, variable=self.cbox_calidad_var)
         self.cbox_calidad.set("Buena calidad")
         self.cbox_calidad.place(x=730, y=180)
         
@@ -68,31 +69,39 @@ class App(CTk):
         self.lb_nombre.configure(font=font_sub)
         self.lb_nombre.place(x=230, y=310)
         
-                
+        # Label para tamaño del video
+        self.lb_peso = CTkLabel(self, text="")
+        self.lb_peso.configure(font=font_sub)
+        self.lb_peso.place(x=70,y=310)
+        
         # Estilo de la tabla de operaciones
         self.style_tabla = ttk.Style()
         self.style_tabla.configure("Custom.Treeview", background="#1a1a1a", foreground="white", rowheigth=10)
         
         # Tabla de operaciones
         self.tabla = ttk.Treeview(self, style="Custom.Treeview")
-        self.tabla["columns"] = ("Nombre","url","estado")
+        self.tabla["columns"] = ("Nombre","URL","Tamaño")
         self.tabla.heading("#0",text="ID")
         self.tabla.heading("Nombre", text="Nombre")
-        self.tabla.heading("url", text="url")
-        self.tabla.heading("estado", text="estado")
+        self.tabla.heading("URL", text="URL")
+        self.tabla.heading("Tamaño", text="Tamaño")
             # Ajuste del tamaño de la tabla
         self.tabla.column("#0",width=35)
         self.tabla.column("Nombre",width=275)
-        self.tabla.column("url",width=420)
-        self.tabla.column("estado",width=100)
+        self.tabla.column("URL",width=420)
+        self.tabla.column("Tamaño",width=70)
         self.tabla.place(x=50,y=380)
         
         self.calidad = 0
         self.cont = 1
         self.c = 1
+        self.tamsize = ""
         
     # FUNCIONES
     
+    def calidades(self,choice):
+        threading.Thread(target=self.calidad_elegida, args=(choice,)).start()
+
     def calidad_elegida(self,choice):
         cal = self.cbox_calidad_var.get()
         if(cal == "Maxima calidad"): self.calidad = 1
@@ -102,6 +111,24 @@ class App(CTk):
         elif (cal == "Solo audio"): self.calidad = 5
         else : self.calidad = 6
         
+        link = self.et_url.get()
+        yt = YouTube(link)
+        if(self.calidad == 1): video = yt.streams.get_highest_resolution()
+        elif(self.calidad in [137, 22, 18]): video = yt.streams.get_by_itag(self.calidad)
+        elif(self.calidad == 5): video = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+        else: video = yt.streams.filter(only_video=True).first()
+        print(self.calidad)
+        try:
+            t = video
+            tam = t.filesize / (1024 * 1024)
+            self.lb_peso.configure(text=f"Peso: {tam:.2f} MB")
+            self.tamsize = f"{tam:.2f}"
+        except: 
+            self.lb_peso.configure(text=f"Peso: -- MB")
+            self.tamsize = "--"
+        
+        
+        
     
     def abrir_ubicacion(self):
         ubicacion = filedialog.askdirectory()
@@ -109,48 +136,56 @@ class App(CTk):
         self.et_ubi.insert(0, ubicacion)
     
     def descargar(self):
+        threading.Thread(target=self.descargar_video).start()
+
+    def descargar_video(self):
         try:
-            
             key = True
             salida = self.et_ubi.get()
             link = self.et_url.get()
             yt = YouTube(link)
-            if(self.et_nombre.get() != ""): yt.title = self.et_nombre.get()
-            
-            if(os.path.exists(os.path.join(salida, self.et_nombre.get()))): 
-                yt.title+=f"({self.c})"
-                self.c+=1
-            
-            if(self.calidad == 1): video = yt.streams.get_highest_resolution()
-            elif(self.calidad in [137, 22, 18]): video = yt.streams.get_by_itag(self.calidad)
-            elif(self.calidad == 5): 
+            if self.et_nombre.get() != "":
+                yt.title = self.et_nombre.get()
+
+            if os.path.exists(os.path.join(salida, self.et_nombre.get())):
+                yt.title += f"({self.c})"
+                self.c += 1
+
+            if self.calidad == 1:
+                video = yt.streams.get_highest_resolution()
+            elif self.calidad in [137, 22, 18]:
+                video = yt.streams.get_by_itag(self.calidad)
+            elif self.calidad == 5:
                 video = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
                 key = False
-            else: video = yt.streams.filter(only_video=True).first()
-            print(self.calidad)
+            else:
+                video = yt.streams.filter(only_video=True).first()
+
+            if key:
+                video.download(output_path=salida)
+            else:
+                video.download(filename=f"{yt.title}.mp3", output_path=salida)
             
-            
-            
-            if(key): video.download(output_path=salida)
-            else: 
-                video.download(filename=f"{yt.title}.mp3",output_path=salida)
-                print("descarga mp3")
-                
-            self.tabla.insert("", "end",text=self.cont, values=(yt.title, link,"terminado"))
+            sizetam = self.tamsize + " Mb"
+
+            self.tabla.insert("", "end", text=self.cont, values=(yt.title, link, sizetam))
             self.cont += 1
         except:
-            messagebox.showerror("Error","Link Invalido")
-        
+            messagebox.showerror("Error", "Link Invalido")
+
     def descargar_playlist(self):
+        threading.Thread(target=self.descargar_playlist_thread).start()
+
+    def descargar_playlist_thread(self):
         try:
             link = self.et_url.get()
             pl = Playlist(link)
             for video in pl.videos:
-                self.tabla.insert("", "end",text=self.cont, values=(video.title, video.watch_url, "terminado"))
+                self.tabla.insert("", "end", text=self.cont, values=(video.title, video.watch_url, "terminado"))
                 self.cont += 1
-        except: 
-            messagebox.showerror("Error","Link Invalido")
-        
+        except:
+            messagebox.showerror("Error", "Link Invalido")
+
 
 if __name__ == "__main__":
     app = App()
