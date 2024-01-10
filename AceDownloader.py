@@ -46,7 +46,9 @@ class App(CTk):
         self.lb_url.configure(font=font_sub)
         self.lb_url.place(x=255, y=240)
 
+        self.et_url_var = StringVar()
         self.et_url = CTkEntry(self, placeholder_text="Ingresa aqui la url del video", width=400)
+        self.et_url.bind("<KeyRelease>", self.verificar_palabra) 
         self.et_url.place(x=300, y=240)
 
         self.btnDescargar = CTkButton(self, text="Descargar", height=50,command=self.descargar)
@@ -97,7 +99,61 @@ class App(CTk):
         self.c = 1
         self.tamsize = ""
         
-    # FUNCIONES
+        self.info_videos = {
+            1:0,
+            137:0,
+            22:0,
+            18:0,
+            5:0,
+            6:0,
+        }
+        
+        
+    # FUNCIONES -----------------------------------------------------------------------------
+    def verificar_palabra(self, evento):
+        print("Prueba")
+        video_url = self.et_url.get()
+        palabra_clave = "https://www.youtube.com/"
+
+        if video_url.startswith(palabra_clave) and len(video_url) > 17:
+            # Iniciar un nuevo hilo para realizar la operación en segundo plano
+            threading.Thread(target=self.procesar_video, args=(video_url,)).start()
+        elif video_url.startswith("https://www.youtube.com/playlist"): print("playlist")
+        else : print("Palabra invallida")
+            
+    
+    def procesar_video(self, link):
+        try:
+            yt = YouTube(link)
+            video = yt.streams.get_highest_resolution()
+            self.info_videos[1] = self.peso_video(video)
+            video = yt.streams.get_by_itag(137)
+            self.info_videos[137] = self.peso_video(video)
+            video = yt.streams.get_by_itag(22)
+            self.info_videos[22] = self.peso_video(video)
+            video = yt.streams.get_by_itag(18)
+            self.info_videos[18] = self.peso_video(video)
+            video = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+            self.info_videos[5] = self.peso_video(video)
+            video = yt.streams.filter(only_video=True).first()
+            self.info_videos[6] = self.peso_video(video)
+        except Exception as e:
+            print(f"Error: {e}")
+        print(self.info_videos)
+        
+
+    def peso_video(self,video):
+        try:
+            t = video
+            tam = t.filesize / (1024 * 1024)
+            #self.lb_peso.configure(text=f"Peso: {tam:.2f} MB")
+            self.tamsize = f"{tam:.2f}"
+            return self.tamsize
+        except: 
+            #self.lb_peso.configure(text=f"Peso: -- MB")
+            self.tamsize = "--"
+            return self.tamsize
+    
     
     def calidades(self,choice):
         threading.Thread(target=self.calidad_elegida, args=(choice,)).start()
@@ -117,18 +173,9 @@ class App(CTk):
         elif(self.calidad in [137, 22, 18]): video = yt.streams.get_by_itag(self.calidad)
         elif(self.calidad == 5): video = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
         else: video = yt.streams.filter(only_video=True).first()
-        print(self.calidad)
-        try:
-            t = video
-            tam = t.filesize / (1024 * 1024)
-            self.lb_peso.configure(text=f"Peso: {tam:.2f} MB")
-            self.tamsize = f"{tam:.2f}"
-        except: 
-            self.lb_peso.configure(text=f"Peso: -- MB")
-            self.tamsize = "--"
-        
-        
-        
+        print(f"Calidad: {self.calidad} - Peso: {self.info_videos[self.calidad]}")
+        self.lb_peso.configure(text=f"{self.info_videos[self.calidad]} Mb")
+
     
     def abrir_ubicacion(self):
         ubicacion = filedialog.askdirectory()
@@ -147,9 +194,12 @@ class App(CTk):
             if self.et_nombre.get() != "":
                 yt.title = self.et_nombre.get()
 
+            """
             if os.path.exists(os.path.join(salida, self.et_nombre.get())):
                 yt.title += f"({self.c})"
                 self.c += 1
+            """
+
 
             if self.calidad == 1:
                 video = yt.streams.get_highest_resolution()
@@ -160,17 +210,19 @@ class App(CTk):
                 key = False
             else:
                 video = yt.streams.filter(only_video=True).first()
-
+            
+            
             if key:
                 video.download(output_path=salida)
             else:
                 video.download(filename=f"{yt.title}.mp3", output_path=salida)
             
-            sizetam = self.tamsize + " Mb"
+            sizetam = self.info_videos[self.calidad] + " Mb"
 
             self.tabla.insert("", "end", text=self.cont, values=(yt.title, link, sizetam))
             self.cont += 1
-        except:
+        except Exception as e:
+            print(f"Error: {e}")
             messagebox.showerror("Error", "Link Invalido")
 
     def descargar_playlist(self):
@@ -179,10 +231,34 @@ class App(CTk):
     def descargar_playlist_thread(self):
         try:
             link = self.et_url.get()
+            salida = self.et_ubi.get()
             pl = Playlist(link)
+            key = True
             for video in pl.videos:
-                self.tabla.insert("", "end", text=self.cont, values=(video.title, video.watch_url, "terminado"))
-                self.cont += 1
+                try:
+                    if self.calidad == 1:
+                        vid = video.streams.get_highest_resolution()
+                    elif self.calidad in [137, 22, 18]:
+                        vid = video.streams.get_by_itag(self.calidad)
+                    elif self.calidad == 5:
+                        vid = video.streams.filter(only_audio=True).order_by('abr').desc().first()
+                        key = False
+                    else:
+                        vid = video.streams.filter(only_video=True).first()
+                    
+                    if key: video.download(output_path=salida)
+                    else: video.download(filename=f"{video.title}.mp3", output_path=salida)
+            
+                    vid.download(output_path=self.et_ubi.get())
+                    t = vid
+                    tam = t.filesize / (1024 * 1024)
+                    peso = f"{tam:.2f}"
+                    self.tabla.insert("", "end", text=self.cont, values=(video.title, video.watch_url, peso))
+                    self.cont += 1
+                except Exception as e: 
+                    print(f"Error: {e}")
+                    self.tabla.insert("", "end", text=self.cont, values=(e, video.watch_url, "Error"))
+                    self.cont += 1
         except:
             messagebox.showerror("Error", "Link Invalido")
 
